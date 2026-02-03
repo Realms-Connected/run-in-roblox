@@ -139,7 +139,6 @@ fn run(options: Options) -> Result<i32, anyhow::Error> {
 
                     if process_command[1].clone().into_string().unwrap().to_string().contains("run-in-roblox-place")
                     {
-                        println!("{:?}", process.cmd());
                         process.kill_with(sysinfo::Signal::Term);
                     }
                 },
