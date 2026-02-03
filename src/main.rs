@@ -2,13 +2,14 @@ mod message_receiver;
 mod place_runner;
 mod plugin;
 
-use std::{path::PathBuf, process, sync::mpsc, thread};
+use std::{env::home_dir, path::PathBuf, process, sync::mpsc, thread};
 
 use anyhow::anyhow;
 use colored::Colorize;
-use fs_err as fs;
+use fs_err::{self as fs, create_dir_all};
 use structopt::StructOpt;
-use tempfile::tempdir;
+use sysinfo::System;
+use tempfile::{tempdir, tempdir_in};
 
 use crate::{
     message_receiver::{OutputLevel, RobloxMessage},
@@ -27,13 +28,27 @@ struct Options {
     /// The script will be run at plugin-level security.
     #[structopt(long("script"))]
     script_path: PathBuf,
+    
+    /// Determines whether the Roblox Studio instance will stay open after the 
+    /// test concludes itself.
+    #[structopt(short("a"), long)]
+    stay_alive: bool,
 }
 
 fn run(options: Options) -> Result<i32, anyhow::Error> {
     // Create a temp directory to house our place, even if a path is given from
     // the command line. This helps ensure Studio won't hang trying to tell the
     // user that the place is read-only because of a .lock file.
-    let temp_place_folder = tempdir()?;
+    let temp_place_folder = 
+        if !cfg!(target_os = "linux") {
+            tempdir()?
+        }
+        else
+        {
+            let temp_dir_path = home_dir().unwrap().join(".tmp");
+            create_dir_all(&temp_dir_path)?;
+            tempdir_in(&temp_dir_path)?
+        };
     let temp_place_path;
 
     match &options.place_path {
@@ -76,6 +91,10 @@ fn run(options: Options) -> Result<i32, anyhow::Error> {
     });
 
     let mut exit_code = 0;
+    
+    let mut warning_count = 0;
+    let mut error_count = 0;
+    let mut print_count = 0;
 
     while let Some(message) = receiver.recv()? {
         match message {
@@ -91,11 +110,65 @@ fn run(options: Options) -> Result<i32, anyhow::Error> {
 
                 if level == OutputLevel::Error {
                     exit_code = 1;
+                    error_count += 1;
+                } else if level == OutputLevel::Warning {
+                    warning_count += 1;
+                } else if level == OutputLevel::Print {
+                    print_count += 1;
                 }
             }
         }
     }
+    
+    if !&options.stay_alive {
+        if !cfg!(target_os = "linux")
+        {
+            unimplemented!("run-in-roblox with stay-alive on non-linux pcs");
+        }
+        
+        let mut system = System::new_all();
+        system.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
+        for process in system.processes_by_name("wine".as_ref()) {
+            let process_command = &process.cmd();
+            if process_command.len() <= 1 {
+                continue;
+            }
 
+            match &process_command[0] {
+                value if value.clone().into_string().unwrap().to_string().ends_with("RobloxStudioBeta.exe") => {
+
+                    if process_command[1].clone().into_string().unwrap().to_string().contains("run-in-roblox-place")
+                    {
+                        println!("{:?}", process.cmd());
+                        process.kill_with(sysinfo::Signal::Term);
+                    }
+                },
+                _ => ()
+            };
+        }
+    }
+
+    
+    print!(
+        "{} error{}, {} warning{}, and {} print{}.", 
+        if error_count == 0 {
+            error_count.to_string().bright_green()
+        } else {
+            error_count.to_string().bright_red()
+        },
+        if error_count == 1 { "" } else { "s" },
+        if warning_count == 0 {
+            warning_count.to_string().bright_green()
+        } else {
+            warning_count.to_string().bright_yellow()
+        },
+        if warning_count == 1 { "" } else { "s" },
+        if print_count == 0 {
+            print_count.to_string().bright_green()
+        } else { print_count.to_string().bright_white() },
+        if print_count == 1 { "" } else { "s" }
+    );
+    
     Ok(exit_code)
 }
 

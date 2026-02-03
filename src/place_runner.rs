@@ -1,8 +1,5 @@
 use std::{
-    path::PathBuf,
-    process::{self, Command, Stdio},
-    sync::mpsc,
-    time::Duration,
+    path::{PathBuf}, process::{self, Command, Stdio}, sync::mpsc, time::Duration
 };
 
 use anyhow::{anyhow, bail, Context};
@@ -31,6 +28,17 @@ pub struct PlaceRunner {
     pub lua_script: String,
 }
 
+fn generate_studio_process(place_runner: &PlaceRunner, studio_install: &RobloxStudio) -> Result<KillOnDrop, anyhow::Error> {
+    
+    Ok(KillOnDrop(
+        Command::new(studio_install.application_path())
+            .arg(format!("{}", &place_runner.place_path.display()))
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()?
+    ))
+}
+
 impl PlaceRunner {
     pub fn run(&self, sender: mpsc::Sender<Option<RobloxMessage>>) -> Result<(), anyhow::Error> {
         let studio_install =
@@ -53,13 +61,39 @@ impl PlaceRunner {
             port: self.port,
             server_id: self.server_id.to_owned(),
         });
+        
+        if cfg!(target_os="linux") {
+            println!("is on linux!");
+        };
 
-        let _studio_process = KillOnDrop(
-            Command::new(studio_install.application_path())
-                .arg(format!("{}", self.place_path.display()))
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .spawn()?,
+        let mut _studio_process = KillOnDrop(
+            // Command::new(studio_install.application_path())
+            if cfg!(target_os = "linux") 
+            {
+                 //  run --command=vinegar org.vinegarhq.Vinegar run")
+                let mut cmd = Command::new("flatpak");
+
+
+                let a = cmd
+                    .arg("run")
+                    .arg("org.vinegarhq.Vinegar")
+                    .arg(format!("{}", self.place_path.display()))
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null());
+
+                
+                println!("{:?}", a);
+                
+                a.spawn()?
+            } 
+            else 
+            {
+                Command::new( studio_install.application_path().as_os_str() )
+                    .arg(format!("{}", self.place_path.display()))
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .spawn()?
+            },
         );
 
         let first_message = message_receiver
