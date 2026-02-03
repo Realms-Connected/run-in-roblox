@@ -62,10 +62,6 @@ impl PlaceRunner {
             server_id: self.server_id.to_owned(),
         });
         
-        if cfg!(target_os="linux") {
-            println!("is on linux!");
-        };
-
         let mut _studio_process = KillOnDrop(
             // Command::new(studio_install.application_path())
             if cfg!(target_os = "linux") 
@@ -81,9 +77,6 @@ impl PlaceRunner {
                     .stdout(Stdio::null())
                     .stderr(Stdio::null());
 
-                
-                println!("{:?}", a);
-                
                 a.spawn()?
             } 
             else 
